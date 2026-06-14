@@ -2,10 +2,15 @@
   "name": "@wrsoftware/semantic-release-config",
   "version": "1.0.0",
   "description": "Shared semantic-release configuration for all Winding River Software repos. Provides the fixed 5-plugin chain that guarantees the four mandatory release outputs.",
+  "type": "commonjs",
   "main": "index.js",
   "files": [
-    "index.js"
+    "index.js",
+    "package-lock.json"
   ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "keywords": [
     "semantic-release",
     "wrsoftware",

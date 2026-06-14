@@ -82,12 +82,17 @@ const config = {
 
     // Step 4: Commit the version bump and CHANGELOG.md back to the branch.
     // Mandatory output 3: the version-number bump is committed.
-    // The version_file to patch is per-project (set in assets override).
+    //
+    // assets intentionally contains ONLY CHANGELOG.md here. The version_file
+    // (package.json, pyproject.toml, a Go const, etc.) is per-project and must
+    // be added via override in the consumer's .releaserc.js. Baking package.json
+    // in here would break every non-Node consumer (Go, static sites, etc.) or
+    // silently no-op the bump when the file does not exist.
     // Forge-agnostic.
     [
       '@semantic-release/git',
       {
-        assets: ['CHANGELOG.md', 'package.json'],
+        assets: ['CHANGELOG.md'],
         message: 'chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}'
       }
     ],
