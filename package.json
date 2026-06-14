@@ -1,0 +1,28 @@
+{
+  "name": "@wrsoftware/semantic-release-config",
+  "version": "1.0.0",
+  "description": "Shared semantic-release configuration for all Winding River Software repos. Provides the fixed 5-plugin chain that guarantees the four mandatory release outputs.",
+  "main": "index.js",
+  "files": [
+    "index.js"
+  ],
+  "keywords": [
+    "semantic-release",
+    "wrsoftware",
+    "shared-config",
+    "release"
+  ],
+  "author": "Winding River Software",
+  "license": "UNLICENSED",
+  "peerDependencies": {
+    "semantic-release": ">=25.0.0"
+  },
+  "dependencies": {
+    "@semantic-release/changelog": "6.0.3",
+    "@semantic-release/commit-analyzer": "13.0.1",
+    "@semantic-release/git": "10.0.1",
+    "@semantic-release/github": "12.0.8",
+    "@semantic-release/release-notes-generator": "14.1.1",
+    "conventional-changelog-conventionalcommits": "9.3.1"
+  }
+}
