@@ -40,7 +40,7 @@ Update to a new version by changing the tag in the install command and in `packa
 In the consuming repo's `.releaserc.js`:
 
 ```js
-// .releaserc.js — minimal: no version_file beyond CHANGELOG.md (e.g. a pure Go binary).
+// .releaserc.js: minimal. No version_file beyond CHANGELOG.md (e.g. a pure Go binary).
 // The full five-plugin chain is inherited; nothing needs to be declared here.
 module.exports = {
   extends: '@wrsoftware/semantic-release-config'
@@ -52,7 +52,7 @@ module.exports = {
 To add your project's `version_file` (a Node `package.json`, a Go const file, a Python `pyproject.toml`, etc.) to the assets the git plugin commits, use the plugin-level config key:
 
 ```js
-// .releaserc.js — Node project that also bumps package.json.
+// .releaserc.js: Node project that also bumps package.json.
 // Overrides only the git plugin's asset list; the other four plugins are untouched.
 module.exports = {
   extends: '@wrsoftware/semantic-release-config',
@@ -68,7 +68,7 @@ module.exports = {
 To append a deploy-tail plugin (e.g. push a Docker image) after the five-plugin chain, use the `namedPlugins` map to build the array by name rather than by position index:
 
 ```js
-// .releaserc.js — project that adds a Docker-push deploy tail after the chain.
+// .releaserc.js: project that adds a Docker-push deploy tail after the chain.
 // References plugins by name (v0.2.0+ API); does not use positional indices.
 const base = require('@wrsoftware/semantic-release-config')
 const { commitAnalyzer, releaseNotes, changelog, git, github } = base.namedPlugins
@@ -94,7 +94,7 @@ module.exports = {
 Sometimes a project needs to run a step between two of the fixed plugins (for example, patching a Go version constant between the changelog write and the git commit). Reference the named plugins from `namedPlugins` to build the insertion by name; never use position indices such as `slice(0, 3)` or `plugins[4]` because they break silently if the chain reorders or grows.
 
 ```js
-// .releaserc.js — Go project that patches its version constant between
+// .releaserc.js: Go project that patches its version constant between
 // the changelog step (3) and the git-commit step (4).
 //
 // Strategy: build the plugins array explicitly using named exports so the
@@ -154,60 +154,103 @@ No per-repo `.releaserc.js` names a forge, so no `.releaserc.js` editing is requ
 
 ## CI invocation contract
 
+**WRS org rule:** merging a PR to main lands the wiring; cutting a release is a separate deliberate dispatch. These are two distinct gates and must not be collapsed.
+
+Invoke the workflow from the CLI:
+
+```sh
+# Real release: computes version, writes changelog, commits bump, creates tag and GitHub release.
+gh workflow run release.yml -f dry_run=false
+
+# Smoke check: runs the full plugin chain without creating a tag or GitHub release.
+gh workflow run release.yml -f dry_run=true
+```
+
 ```yaml
-release:
-  # Use self-hosted for release jobs (they interact with production infrastructure).
-  # Add [self-hosted, builder] only if this job also pushes a Docker image.
-  runs-on: self-hosted
-  steps:
-    - uses: actions/checkout@v6
-      with:
-        fetch-depth: 0       # required: semantic-release reads full tag history
+name: Release
 
-    - uses: actions/setup-node@v6
-      with:
-        node-version: '22'
+on:
+  # Releases are deliberate. There is NO push-to-main auto-trigger.
+  # Merging a PR to main does NOT cut a release.
+  # Use dry_run=false for a real release, dry_run=true for a smoke check.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run semantic-release in dry-run mode (no tag, no release)"
+        type: boolean
+        default: false
 
-    - name: Install semantic-release and shared config
-      run: npm ci            # use npm ci, not npm install, to honour package-lock.json
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  # cancel-in-progress: false - a manual release must not be cancelled mid-bump.
+  # No push race exists (workflow_dispatch only), so queuing a second accidental
+  # dispatch is safer than cancelling a run that may have already committed the
+  # changelog before the forge step completes.
+  cancel-in-progress: false
 
-    - name: Assert forge token is set
-      # **REQUIRED:** this pre-flight runs BEFORE npx semantic-release.
-      # A missing token would otherwise cause @semantic-release/git to commit the
-      # changelog and version bump to main and THEN fail at the forge step, leaving
-      # the repo in a partial "released but not tagged" state.
-      run: |
-        if [ -z "$GITHUB_TOKEN" ]; then
-          echo "ERROR: GITHUB_TOKEN is empty. Aborting before git step runs." >&2
-          exit 1
-        fi
+permissions:
+  contents: write       # required: semantic-release creates tags and pushes bump commit
+  issues: write         # required: @semantic-release/github creates/closes release issues
+  pull-requests: write  # required: @semantic-release/github comments on PRs
 
-    - name: Release
-      id: release          # required: the post-release assert reads outputs from this id
-      run: npx semantic-release
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+jobs:
+  release:
+    # Use self-hosted for release jobs (they interact with production infrastructure).
+    # Add [self-hosted, builder] only if this job also pushes a Docker image.
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0            # required: semantic-release reads full tag history
+          persist-credentials: true # required: @semantic-release/git pushes the bump commit
 
-    - name: Assert version bump matches tag
-      # Only runs when a release was actually published (id: release required above).
-      if: steps.release.outputs.new_release_published == 'true'
-      run: |
-        # Replace with the project's actual version_file read command.
-        # Example for a Node project reading package.json:
-        FILE_VERSION=$(node -p "require('./package.json').version")
-        TAG_VERSION="${{ steps.release.outputs.new_release_version }}"
-        if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
-          echo "ERROR: version_file shows $FILE_VERSION but tag is $TAG_VERSION" >&2
-          exit 1
-        fi
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install semantic-release and shared config
+        run: npm ci                 # use npm ci, not npm install, to honour package-lock.json
+
+      - name: Assert forge token is set (pre-flight)
+        # REQUIRED: this pre-flight runs BEFORE npx semantic-release.
+        # A missing token would otherwise cause @semantic-release/git to commit the
+        # changelog and version bump to main and THEN fail at the forge step, leaving
+        # the repo in a partial "released but not tagged" state.
+        run: |
+          if [ -z "$GITHUB_TOKEN" ]; then
+            echo "ERROR: GITHUB_TOKEN is empty. Aborting before git step runs." >&2
+            exit 1
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release
+        id: release                 # required: the post-release assert reads outputs from this id
+        run: npx semantic-release ${{ inputs.dry_run == true && '--dry-run' || '' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assert version bump matches tag
+        # Only runs when a release was actually published (id: release required above).
+        if: steps.release.outputs.new_release_published == 'true'
+        env:
+          TAG_VERSION: ${{ steps.release.outputs.new_release_version }}
+        run: |
+          # Replace with the project's actual version_file read command.
+          # Example for a Node project reading package.json:
+          FILE_VERSION=$(node -p "require('./package.json').version")
+          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
+            echo "ERROR: version_file shows $FILE_VERSION but tag is $TAG_VERSION" >&2
+            exit 1
+          fi
 ```
 
 Key rules from the WRS release standard:
 - `fetch-depth: 0` is required: semantic-release must read the full tag history to compute the next version.
-- **The forge-token pre-flight assert is REQUIRED** and runs before `npx semantic-release`. Without it, a missing token produces a "released but not tagged" partial state that requires a manual revert.
+- **The forge-token pre-flight assert is REQUIRED** and runs before `npx semantic-release`. Without it, a missing token produces a "released but not tagged" partial state that requires a manual revert. The token is passed via `env:` on the assert step, not interpolated into the shell command.
 - The `id: release` on the semantic-release step is required for the post-release assert's `steps.release.outputs` reference to resolve. Without it the assert condition is always false and the guard never fires.
-- The post-release assert confirms the version file matches the tag before the job exits.
-- `npx semantic-release` runs only on trunk pushes, never on PR builds.
+- The post-release assert confirms the version file matches the tag before the job exits. `TAG_VERSION` is set via `env:` (not shell interpolation) so the expression evaluates outside the shell context.
+- `cancel-in-progress: false` is required: a mid-flight cancellation after `@semantic-release/git` has committed the bump but before the forge step completes produces the "released but not tagged" partial state. Queuing a second accidental dispatch is always safer.
 - **No release produced is normal:** if no conventional commit has occurred since the last tag, semantic-release exits 0 and produces no release. This is expected behavior, not a failure. If a release was expected and not produced, inspect the commit log: one or more messages likely used a non-conventional format and were not counted as releasable by `@semantic-release/commit-analyzer`.
 - `npm ci` (not `npm install`) honours `package-lock.json` and locks the transitive dependency graph.
 
