@@ -17,7 +17,7 @@
  * project's .releaserc.js extends block, never here.
  *
  * Consumption (git-install, pinned tag, no floating ref):
- *   npm install github:windingriverholdings/semantic-release-config#v1.0.0
+ *   npm install github:windingriverholdings/semantic-release-config#v0.1.0
  *   # in .releaserc.js:
  *   extends: '@wrsoftware/semantic-release-config'
  */

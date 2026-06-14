@@ -30,7 +30,7 @@ Only plugin 5 is forge-coupled. See Forge portability below.
 Install directly from GitHub at an exact tag. Never use a caret range or a floating ref.
 
 ```sh
-npm install github:windingriverholdings/semantic-release-config#v1.0.0
+npm install github:windingriverholdings/semantic-release-config#v0.1.0
 ```
 
 Update to a new version by changing the tag in the install command and in `package.json`. No npm registry required.
@@ -102,7 +102,7 @@ Only `@semantic-release/github` (plugin 5) is forge-coupled. To migrate the org 
 1. In `index.js`, replace the single line `'@semantic-release/github'` with `'@semantic-release/gitlab'`.
 2. Update the CI secret variable from `GITHUB_TOKEN` to `GITLAB_TOKEN` (or the org-standard name at the time).
 3. Bump the shared config major version (breaking change; bump to v2.0.0).
-4. In each consumer repo: update the tag in `package.json` from `#v1.0.0` to `#v2.0.0`, then run `npm install github:windingriverholdings/semantic-release-config#v2.0.0` to fetch the new version and regenerate `package-lock.json`. Commit both files. The update is not automatic.
+4. In each consumer repo: update the tag in `package.json` from `#v0.1.0` to `#v2.0.0`, then run `npm install github:windingriverholdings/semantic-release-config#v2.0.0` to fetch the new version and regenerate `package-lock.json`. Commit both files. The update is not automatic.
 
 No per-repo `.releaserc.js` names a forge, so no `.releaserc.js` editing is required beyond the install pin update.
 
