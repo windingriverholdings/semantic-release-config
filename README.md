@@ -91,7 +91,9 @@ module.exports = {
 
 ## Mid-chain plugin insertion
 
-Sometimes a project needs to run a step between two of the fixed plugins (for example, patching a Go version constant between the changelog write and the git commit). Reference the named plugins from `namedPlugins` to build the insertion by name; never use position indices such as `slice(0, 3)` or `plugins[4]` because they break silently if the chain reorders or grows.
+Sometimes a project needs to run a step between two of the fixed plugins. The canonical use cases are rewriting a language-specific version file (a Go const, a Node `package.json`) between the changelog write and the git commit. Reference the named plugins from `namedPlugins` to build the insertion by name; never use position indices such as `slice(0, 3)` or `plugins[4]` because they break silently if the chain reorders or grows.
+
+### Go repos: rewrite a version constant
 
 ```js
 // .releaserc.js: Go project that patches its version constant between
@@ -122,6 +124,48 @@ module.exports = {
   ]
 }
 ```
+
+### Node repos: rewrite package.json version
+
+`@semantic-release/git` stages and commits files; it does **not** rewrite them. For a Node repo, `package.json` must be rewritten to the computed version before the git plugin runs, or the post-release version-bump assert will fail because the file on disk still holds the old version.
+
+The fix is to insert `@semantic-release/npm` with `{ npmPublish: false }` immediately before the git plugin. It rewrites `package.json` in place without publishing to a registry.
+
+```js
+// .releaserc.js: Node / package.json project that bumps package.json as part
+// of the release commit.
+//
+// WHY @semantic-release/npm is required here:
+//   @semantic-release/git only commits files that already exist on disk with
+//   the new version written into them. It does NOT rewrite package.json itself.
+//   @semantic-release/npm with npmPublish:false is what actually rewrites
+//   package.json to the computed version before git stages it.
+//   Without this step the post-release assert ("version_file matches tag")
+//   will always fail because package.json still shows the old version after
+//   the tag is cut.
+const base = require('@wrsoftware/semantic-release-config')
+const { commitAnalyzer, releaseNotes, changelog, git, github } = base.namedPlugins
+
+module.exports = {
+  extends: '@wrsoftware/semantic-release-config',
+  plugins: [
+    commitAnalyzer,    // step 1: analyze commits
+    releaseNotes,      // step 2: generate notes
+    changelog,         // step 3: write CHANGELOG.md
+
+    // Inserted between changelog (3) and git (4):
+    // rewrite package.json to the computed version without publishing to npm.
+    ['@semantic-release/npm', { npmPublish: false }],
+
+    // step 4: commit CHANGELOG.md and the rewritten package.json
+    [git[0], { ...git[1], assets: ['CHANGELOG.md', 'package.json'] }],
+
+    github             // step 5: create tag and forge release
+  ]
+}
+```
+
+This is the counterpart to the Go pattern above. Both use the same `namedPlugins` composition; the only difference is the mid-chain step (exec+sed for Go, npm for Node).
 
 Key points for any mid-chain insertion:
 
@@ -156,6 +200,8 @@ No per-repo `.releaserc.js` names a forge, so no `.releaserc.js` editing is requ
 
 **WRS org rule:** merging a PR to main lands the wiring; cutting a release is a separate deliberate dispatch. These are two distinct gates and must not be collapsed.
 
+The `dry_run` input defaults to `true`. A bare `gh workflow run` or an Actions UI dispatch with the checkbox left unchecked is always a harmless smoke check. A real release requires an explicit flag. This makes the launch gate self-enforcing: an accidental UI dispatch cannot cut a tag.
+
 Invoke the workflow from the CLI:
 
 ```sh
@@ -163,6 +209,7 @@ Invoke the workflow from the CLI:
 gh workflow run release.yml -f dry_run=false
 
 # Smoke check: runs the full plugin chain without creating a tag or GitHub release.
+# This is also what a bare dispatch (no -f flag) produces.
 gh workflow run release.yml -f dry_run=true
 ```
 
@@ -172,13 +219,16 @@ name: Release
 on:
   # Releases are deliberate. There is NO push-to-main auto-trigger.
   # Merging a PR to main does NOT cut a release.
-  # Use dry_run=false for a real release, dry_run=true for a smoke check.
+  #
+  # dry_run defaults to true: a bare or UI dispatch is always a safe smoke check.
+  # To cut a real release, pass dry_run=false explicitly:
+  #   gh workflow run release.yml -f dry_run=false
   workflow_dispatch:
     inputs:
       dry_run:
         description: "Run semantic-release in dry-run mode (no tag, no release)"
         type: boolean
-        default: false
+        default: true
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
