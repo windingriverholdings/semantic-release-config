@@ -30,7 +30,7 @@ Only plugin 5 is forge-coupled. See Forge portability below.
 Install directly from GitHub at an exact tag. Never use a caret range or a floating ref.
 
 ```sh
-npm install github:windingriverholdings/semantic-release-config#v0.1.0
+npm install github:windingriverholdings/semantic-release-config#v0.2.0
 ```
 
 Update to a new version by changing the tag in the install command and in `package.json`. No npm registry required.
@@ -65,24 +65,70 @@ module.exports = {
 }
 ```
 
-To append a deploy-tail plugin (e.g. push a Docker image) after the five-plugin chain, use `plugins:` in the child config **only** to express the full chain plus your addition. Copy the chain from `index.js` verbatim, then append:
+To append a deploy-tail plugin (e.g. push a Docker image) after the five-plugin chain, use the `namedPlugins` map to build the array by name rather than by position index:
 
 ```js
-// .releaserc.js — project that adds a Docker-push deploy tail.
-// Must redeclare the full chain because appending via extends is not supported.
-// Keep this in sync with index.js; divergence is a review finding.
+// .releaserc.js — project that adds a Docker-push deploy tail after the chain.
+// References plugins by name (v0.2.0+ API); does not use positional indices.
 const base = require('@wrsoftware/semantic-release-config')
+const { commitAnalyzer, releaseNotes, changelog, git, github } = base.namedPlugins
 
 module.exports = {
-  ...base,
+  extends: '@wrsoftware/semantic-release-config',
   plugins: [
-    ...base.plugins,
+    commitAnalyzer,
+    releaseNotes,
+    changelog,
+    git,
+    github,
+    // Append the project-specific deploy tail after the fixed chain.
     ['@semantic-release/exec', {
       publishCmd: 'docker push wrsoftware/myimage:${nextRelease.version}'
     }]
   ]
 }
 ```
+
+## Mid-chain plugin insertion
+
+Sometimes a project needs to run a step between two of the fixed plugins (for example, patching a Go version constant between the changelog write and the git commit). Reference the named plugins from `namedPlugins` to build the insertion by name; never use position indices such as `slice(0, 3)` or `plugins[4]` because they break silently if the chain reorders or grows.
+
+```js
+// .releaserc.js — Go project that patches its version constant between
+// the changelog step (3) and the git-commit step (4).
+//
+// Strategy: build the plugins array explicitly using named exports so the
+// insertion point is identified by name, not by index.
+const base = require('@wrsoftware/semantic-release-config')
+const { commitAnalyzer, releaseNotes, changelog, git, github } = base.namedPlugins
+
+module.exports = {
+  extends: '@wrsoftware/semantic-release-config',
+  plugins: [
+    commitAnalyzer,    // step 1: analyze commits
+    releaseNotes,      // step 2: generate notes
+    changelog,         // step 3: write CHANGELOG.md
+
+    // Inserted between changelog (3) and git (4):
+    // patch the version constant in the Go source file before git commits it.
+    ['@semantic-release/exec', {
+      prepareCmd: 'sed -i "s/const serverVersion = \\"[^\\\"]*\\"/const serverVersion = \\"${nextRelease.version}\\"/" internal/version/version.go'
+    }],
+
+    // step 4: commit CHANGELOG.md and the patched version file
+    [git[0], { ...git[1], assets: ['CHANGELOG.md', 'internal/version/version.go'] }],
+
+    github             // step 5: create tag and forge release
+  ]
+}
+```
+
+Key points for any mid-chain insertion:
+
+- Destructure from `base.namedPlugins`, not from `base.plugins` (positional). The names are stable across chain reorders; indices are not.
+- When overriding a plugin's options inline (as with `git` above), spread the existing options (`...git[1]`) and add only the delta. This means future changes to the shared default options (e.g. the release commit message) propagate to the consumer automatically.
+- The `extends:` line is still present. In semantic-release, `extends` loads the parent config for any key NOT redeclared in the child. Because `plugins:` IS redeclared here, the child array wins. The `branches` and other non-plugin fields still inherit from the shared config.
+- Every insertion is a review finding if it violates the "May NOT override" list in the standard (e.g. changing the conventional-commits ruleset or the forge plugin).
 
 ## Conventional commits
 
@@ -102,7 +148,7 @@ Only `@semantic-release/github` (plugin 5) is forge-coupled. To migrate the org 
 1. In `index.js`, replace the single line `'@semantic-release/github'` with `'@semantic-release/gitlab'`.
 2. Update the CI secret variable from `GITHUB_TOKEN` to `GITLAB_TOKEN` (or the org-standard name at the time).
 3. Bump the shared config major version (breaking change; bump to v2.0.0).
-4. In each consumer repo: update the tag in `package.json` from `#v0.1.0` to `#v2.0.0`, then run `npm install github:windingriverholdings/semantic-release-config#v2.0.0` to fetch the new version and regenerate `package-lock.json`. Commit both files. The update is not automatic.
+4. In each consumer repo: update the tag in `package.json` from `#v0.2.0` to `#v2.0.0`, then run `npm install github:windingriverholdings/semantic-release-config#v2.0.0` to fetch the new version and regenerate `package-lock.json`. Commit both files. The update is not automatic.
 
 No per-repo `.releaserc.js` names a forge, so no `.releaserc.js` editing is required beyond the install pin update.
 
