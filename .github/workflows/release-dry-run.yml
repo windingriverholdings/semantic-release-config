@@ -1,0 +1,107 @@
+# release-dry-run.yml
+#
+# Runs on every pull_request to verify that the shared config produces all four
+# mandatory release outputs without error. Uses a GitHub-hosted runner: this job
+# performs no deployment, no Docker push, and no forge publish; it is test-only CI.
+# GitHub-hosted runners are acceptable for test-only CI per the WRS devops policy
+# (devops.md: "GitHub-hosted runners acceptable for test-only CI on third-party-org
+# repos where no deployment, secret access, or registry push occurs").
+#
+# A one-character regression in index.js will fail this check before any tag ships.
+
+name: Release dry-run
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # fetch-depth: 0 is required: semantic-release reads full tag history
+          # to compute the next version. Shallow clones produce incorrect results.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Seed conventional-commit fixture
+        # Creates a baseline tag and three conventional commits so the dry-run
+        # has releasable history to analyze. The commits are: one feat (triggers
+        # minor), one fix (patch), one perf (patch). Net bump: minor (0.1.0 -> 0.2.0).
+        run: |
+          git config user.email "ci@windingriverholdings.com"
+          git config user.name "WRS CI"
+          git tag v0.1.0
+          echo "fixture-a" >> .fixture
+          git add .fixture
+          git commit -m "feat: add fixture feature for dry-run"
+          echo "fixture-b" >> .fixture
+          git add .fixture
+          git commit -m "fix: correct fixture value"
+          echo "fixture-c" >> .fixture
+          git add .fixture
+          git commit -m "perf: improve fixture performance"
+
+      - name: Run semantic-release dry-run
+        id: dry_run
+        # GITHUB_TOKEN is passed so the github plugin can verify auth and reach
+        # the repo. No release, tag, or publish is performed in dry-run mode.
+        run: |
+          npx semantic-release --dry-run --no-ci 2>&1 | tee /tmp/dry-run-output.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assert four mandatory outputs were computed
+        # Verifies each of the four mandatory outputs appeared in the dry-run log.
+        # "Would publish" evidence: semantic-release logs the computed version and
+        # the release notes it would generate, then skips actual writes in dry-run.
+        run: |
+          OUTPUT=$(cat /tmp/dry-run-output.txt)
+          FAIL=0
+
+          # Output 1: semantic version computed
+          if echo "$OUTPUT" | grep -q "The next release version is"; then
+            echo "PASS: semantic version computed"
+          else
+            echo "FAIL: no next release version found in output" >&2
+            FAIL=1
+          fi
+
+          # Output 2: changelog entry generated (release notes produced)
+          if echo "$OUTPUT" | grep -q "generateNotes"; then
+            echo "PASS: release notes generated"
+          else
+            echo "FAIL: release notes step not found in output" >&2
+            FAIL=1
+          fi
+
+          # Output 3: git prepare step ran (would commit bump and CHANGELOG.md)
+          if echo "$OUTPUT" | grep -q "Skip step \"prepare\" of plugin \"@semantic-release/git\""; then
+            echo "PASS: git prepare step confirmed present (skipped in dry-run as expected)"
+          else
+            echo "FAIL: @semantic-release/git prepare step not found in output" >&2
+            FAIL=1
+          fi
+
+          # Output 4: forge publish step ran (would create tag and release)
+          if echo "$OUTPUT" | grep -q "Skip step \"publish\" of plugin \"@semantic-release/github\""; then
+            echo "PASS: forge publish step confirmed present (skipped in dry-run as expected)"
+          else
+            echo "FAIL: @semantic-release/github publish step not found in output" >&2
+            FAIL=1
+          fi
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo ""
+            echo "--- dry-run output ---"
+            cat /tmp/dry-run-output.txt
+            exit 1
+          fi
