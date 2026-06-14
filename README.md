@@ -132,6 +132,7 @@ module.exports = {
 The fix is to insert `@semantic-release/npm` with `{ npmPublish: false }` immediately before the git plugin. It rewrites `package.json` in place without publishing to a registry.
 
 ```js
+'use strict'
 // .releaserc.js: Node / package.json project that bumps package.json as part
 // of the release commit.
 //
