@@ -3,11 +3,22 @@
 /**
  * Shared semantic-release configuration for Winding River Software.
  *
- * Guarantees the four mandatory release outputs for every managed repo:
+ * Guarantees the four mandatory release outputs for every managed repo whose
+ * release identity can push a commit to the release branch:
  *   1. A semantic version computed from conventional commits since the last release.
  *   2. A changelog entry describing what changed at that version.
  *   3. A version-number bump written to the project's canonical version location.
  *   4. A tagged release of the code at that version on the SCM host.
+ *
+ * DOCUMENTED EXCEPTION (README "Branch-protection exception", openbrain
+ * precedent): a repo whose release branch is protected against its own
+ * release identity (GITHUB_TOKEN only, no bot-bypass rule) may drop
+ * `changelog` and `git` from its plugin array. Outputs 2 and 3 are then
+ * satisfied differently: the changelog lives only in the release notes
+ * (outputs 1/4's `releaseNotes` + `github` plugins), and the version bump is
+ * stamped into the build artifact at build time instead of committed to a
+ * source file. See the README before relying on this: it applies only to
+ * that specific branch-protection case, not as a general opt-out.
  *
  * The five-plugin chain is fixed org-wide. The only forge-coupled plugin is
  * @semantic-release/github (position 5). To swap forges, replace that one

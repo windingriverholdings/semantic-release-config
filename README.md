@@ -1,15 +1,48 @@
 # @wrsoftware/semantic-release-config
 
-Shared [semantic-release](https://github.com/semantic-release/semantic-release) configuration for all Winding River Software repos. Every managed repo extends this config; the four mandatory release outputs are guaranteed by the shared core.
+Shared [semantic-release](https://github.com/semantic-release/semantic-release) configuration for all Winding River Software repos. Every managed repo extends this config; the four mandatory release outputs are guaranteed by the shared core for any repo whose release identity can push a commit to the release branch. See "Branch-protection exception" below for the documented carve-out when it cannot.
 
 ## The four mandatory outputs
 
-Every release of every managed WRS repo produces all four. They cannot be opted out:
+Every release of every managed WRS repo produces all four. They cannot be opted out, except by the documented branch-protection exception below:
 
 1. A semantic version, computed from conventional commits since the last release.
 2. A changelog entry written to `CHANGELOG.md`.
 3. A version-number bump committed back to the release branch.
 4. A tagged release on the SCM host (GitHub today, portable: see Forge portability).
+
+## Branch-protection exception (openbrain precedent)
+
+A repo whose release branch is protected against its own release identity
+(a `GITHUB_TOKEN`-only workflow, no bot-bypass rule) cannot satisfy outputs 2
+and 3 as written above: `@semantic-release/git` pushing a bump commit to a
+protected branch is rejected by the forge (GitHub: `GH013`), and by the time
+that happens the version has already been computed and logged, leaving the
+run in a partial "released but not tagged" state.
+
+For that specific case, and only that case, a consumer's `.releaserc.js` may
+drop `changelog` and `git` from the plugin array (see "Mid-chain plugin
+insertion" for the named-export composition pattern) and rely on:
+
+- Output 2 (changelog entry): satisfied by the release notes
+  `release-notes-generator` already produces and `@semantic-release/github`
+  already publishes. There is no `CHANGELOG.md` file in the repo; the
+  changelog exists only on the forge release page.
+- Output 3 (version-number bump): satisfied by stamping the version into the
+  build artifact at build time (for example Go `ldflags -X`, gated by a
+  canary smoke-test) instead of committing it to a source file. This
+  build-time stamp is the consumer's own release doctrine, not part of this
+  shared config; see the consumer's `RELEASING.md`.
+
+Outputs 1 and 4 (the semver tag and the forge release) are unaffected: the
+`commitAnalyzer`, `releaseNotes`, and `github` plugins stay in the chain
+exactly as documented. windingriverholdings/openbrain is the precedent for
+this exception (its main branch requires pull requests, with no bot-bypass
+rule).
+
+This exception does NOT apply to a repo whose release identity CAN push to
+the branch. Dropping `changelog`/`git` there is scope creep on this
+exception, not a legitimate use of it, and is a review finding.
 
 ## The five-plugin chain
 
@@ -309,7 +342,7 @@ Key rules from the WRS release standard:
 
 **May override:** `branches`, `version_file` location (via `@semantic-release/git` `assets`), any deploy-tail plugin appended after the chain.
 
-**May NOT override:** the five-plugin chain order, the conventional-commits ruleset, the changelog format, the release-commit message convention, or the forge plugin. Overriding any of these in a per-repo config defeats the define-once guarantee and is a review finding.
+**May NOT override:** the five-plugin chain order, the conventional-commits ruleset, the changelog format, the release-commit message convention, or the forge plugin. Overriding any of these in a per-repo config defeats the define-once guarantee and is a review finding, with one documented carve-out: a repo may drop `changelog` and `git` under the branch-protection exception above. Dropping them for any other reason is still a review finding.
 
 ## Failure modes
 
