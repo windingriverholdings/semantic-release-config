@@ -219,6 +219,36 @@ All commits must follow the [Conventional Commits](https://www.conventionalcommi
 | Any type with `BREAKING CHANGE:` footer | major |
 | `docs:`, `style:`, `chore:`, `refactor:`, `test:`, `ci:` | none (no release) |
 
+## Merge-commit PR parsing (KM-680, v0.3.0)
+
+Every managed repo merges PRs as a regular merge commit, never a squash
+(the org-wide never-squash doctrine). That merge commit's first line is
+always `Merge pull request #NNN from <branch>`, and the PR title, the line
+conventional-commits-parser actually needs for typing, sits on the second
+line of the merge-commit body instead. By default the parser reads only the
+first line, so a `feat`/`fix` whose type lives only in the PR title is
+parsed as typeless: it contributes nothing to the bump computation and is
+silently dropped from the release notes, even though the release genuinely
+contains that change.
+
+As of v0.3.0, `commitAnalyzer` and `releaseNotes` both carry a `parserOpts`
+with `mergePattern: /^Merge pull request #(\d+) from (.*)$/` and
+`mergeCorrespondence: ['id', 'source']`. When the first line matches, the
+parser records the merge correspondence and re-parses the remainder of the
+message (the PR title) as the real conventional-commit header, so
+`feat(wa-131): ...` in the merge body is typed as a feat. This is additive
+per plugin: it does not replace the `conventionalcommits` preset's
+`parserOpts`, only adds `mergePattern`/`mergeCorrespondence` on top, so
+`headerPattern`, breaking-change detection, and note keywords are unchanged.
+
+**Trade-off (accepted):** when a PR's individual commits are already
+conventionally typed (`feat: ...`, `fix: ...`), the merge-commit body now
+contributes a second, duplicate bullet for the same change in the release
+notes. This is the safe direction: a change listed twice beats a change
+silently dropped. Repos that use a bracketed `[PROJ-NNN]` WIP convention on
+individual commits (never conventionally typed) see no duplication; only
+the curated PR-title line appears.
+
 ## Forge portability
 
 Only `@semantic-release/github` (plugin 5) is forge-coupled. To migrate the org from GitHub to GitLab:

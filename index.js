@@ -40,6 +40,57 @@
  */
 
 // ---------------------------------------------------------------------------
+// KM-680: correct the version bump and release notes for merge-commit PRs
+// under the org-wide never-squash doctrine (development-workflow.md).
+//
+// THE DEFECT: every managed repo merges PRs as regular merge commits, never
+// squash, so a PR lands as a merge commit whose FIRST line is
+//   Merge pull request #NNN from <branch>
+// and whose conventional-commit type (the PR title) sits in the SECOND line
+// (the merge-commit body). conventional-commits-parser reads only the FIRST
+// line for the type, so a feat/fix whose type lives only in the PR title is
+// parsed as typeless and contributes NOTHING: it drops out of both the bump
+// computation and the notes. This is exactly how openknowledge's KM-674 (a
+// feat) was computed as a PATCH and dropped from the v0.22.0 notes: its
+// individual commits used the bracketed [KM-674] WIP form, so the feat type
+// survived only in the merge #283 body. First fixed locally in
+// openknowledge's .releaserc.js; this port makes the fix org-wide so every
+// consumer gets it without a per-repo override.
+//
+// THE FIX (config-only, no per-merge human discipline): give the parser a
+// mergePattern. conventional-commits-parser, when the first line matches
+// mergePattern, records the merge correspondence fields (id, source) and then
+// RE-PARSES the remainder of the message (the body / PR title) as the real
+// header, so `feat(wa-131): ...` in the body is typed as a feat. Verified
+// empirically against conventional-commits-parser 6.4.0 and a real merge
+// commit (91fbe2f) from windingriverholdings/www.alleykatartisans.com: before
+// the fix, commit-analyzer computes releaseType null (no release at all,
+// the feat is silently dropped) with empty notes; after, it computes minor
+// with the WA-131 feat under Features.
+//
+// This is applied to BOTH the commit-analyzer (bump) and the
+// release-notes-generator (notes), because each loads its own parser. Per
+// @semantic-release/commit-analyzer load-parser-config.js and
+// @semantic-release/release-notes-generator load-changelog-config.js, a
+// plugin-level parserOpts is spread OVER the preset's parser opts
+// (`{ ...loadedConfig.parser, ...parserOpts }`), so this is purely additive:
+// the conventionalcommits preset's headerPattern, breaking-change detection,
+// and note keywords are all preserved. Only mergePattern + mergeCorrespondence
+// are added.
+//
+// TRADE-OFF (accepted, safe direction): when a PR's INDIVIDUAL commits are
+// ALSO conventionally typed, the merge-commit body now adds one more bullet
+// for the same change, so the notes can list a change more than once. This is
+// the safe direction: listing a change twice is preferable to dropping it
+// entirely. The dominant bracketed [PROJ-NNN] WIP commit convention never
+// parses as a conventional type, so those PRs produce ZERO duplication and
+// only the curated PR-title line appears.
+const mergeParserOpts = {
+  mergePattern: /^Merge pull request #(\d+) from (.*)$/,
+  mergeCorrespondence: ['id', 'source']
+}
+
+// ---------------------------------------------------------------------------
 // Individual plugin definitions.
 // Each is a standalone value so consumers can reference them by name rather
 // than by positional index. The default export assembles them in the fixed
@@ -51,6 +102,7 @@ const commitAnalyzer = [
   '@semantic-release/commit-analyzer',
   {
     preset: 'conventionalcommits',
+    parserOpts: mergeParserOpts,
     releaseRules: [
       { type: 'feat', release: 'minor' },
       { type: 'fix', release: 'patch' },
@@ -72,6 +124,7 @@ const releaseNotes = [
   '@semantic-release/release-notes-generator',
   {
     preset: 'conventionalcommits',
+    parserOpts: mergeParserOpts,
     presetConfig: {
       types: [
         { type: 'feat', section: 'Features' },
@@ -155,9 +208,15 @@ const pluginsByName = {
 // ---------------------------------------------------------------------------
 // Default export: the config object.
 // BACKWARD-COMPAT INVARIANT: this object is assembled from the same plugin
-// constants as v0.1.0 and produces a byte-identical plugin array. A v0.1.0
-// consumer upgrading to v0.2.0 by changing only the pin receives the same
-// five-plugin chain. The named exports are purely additive.
+// constants used since v0.1.0 and produces the same five-plugin chain in the
+// same order; a consumer upgrading by changing only the pin keeps that chain
+// and its named exports. KM-680 (v0.3.0) is the one intentional exception:
+// commitAnalyzer and releaseNotes now carry parserOpts (mergePattern +
+// mergeCorrespondence, see above) so merge-commit PRs bump and release-note
+// correctly under the never-squash doctrine. The change is purely additive
+// per plugin (existing preset/releaseRules/presetConfig options are
+// untouched) and only widens which commits type correctly; see the README
+// changelog note for the v0.2.0 -> v0.3.0 upgrade.
 // ---------------------------------------------------------------------------
 
 /** @type {import('semantic-release').GlobalConfig} */
